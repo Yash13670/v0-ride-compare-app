@@ -14,7 +14,7 @@ Any changes you make to your deployed app will be automatically pushed to this r
 
 Your project is live at:
 
-**[https://vercel.com/scientist-specs-projects/v0-ride-compare-app](https://vercel.com/scientist-specs-projects/v0-ride-compare-app)**
+**(https://stunning-tribble-5g467497wpr9h4xv9-3000.app.github.dev/)**
 
 ## Build your app
 

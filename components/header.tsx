@@ -1,14 +1,44 @@
 "use client"
 
-import { useState } from "react"
-import { Car, Menu, X, Sparkles } from "lucide-react"
+import { useState, useEffect } from "react"
+import { Car, Menu, X, Sparkles, User, LogOut } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { MagneticButton } from "@/components/magnetic-button"
 import { cn } from "@/lib/utils"
+import Link from "next/link"
+import { createClient } from "@/lib/supabase/client"
+import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 export function Header() {
   const [isOpen, setIsOpen] = useState(false)
   const [hoveredLink, setHoveredLink] = useState<string | null>(null)
+  const [user, setUser] = useState<SupabaseUser | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    const supabase = createClient()
+
+    // Check current session
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user)
+      setIsLoading(false)
+    })
+
+    // Listen for auth changes
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
+
+    return () => subscription.unsubscribe()
+  }, [])
+
+  const handleLogout = async () => {
+    const supabase = createClient()
+    await supabase.auth.signOut()
+    setUser(null)
+  }
 
   const navLinks = [
     { href: "#compare", label: "Compare" },
@@ -20,7 +50,7 @@ export function Header() {
     <header className="sticky top-0 z-50 bg-primary text-primary-foreground backdrop-blur-sm">
       <div className="container mx-auto px-4">
         <div className="flex h-16 items-center justify-between">
-          <div className="flex items-center gap-2 group cursor-pointer">
+          <Link href="/" className="flex items-center gap-2 group cursor-pointer">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary-foreground transition-all duration-300 group-hover:scale-110 group-hover:rotate-6 group-hover:shadow-lg">
               <Car className="h-6 w-6 text-primary transition-transform duration-300 group-hover:scale-110" />
             </div>
@@ -28,7 +58,7 @@ export function Header() {
               Ridewise
             </span>
             <Sparkles className="h-4 w-4 opacity-0 -ml-1 transition-all duration-300 group-hover:opacity-100 group-hover:ml-1 text-primary-foreground" />
-          </div>
+          </Link>
 
           <nav className="hidden md:flex items-center gap-8">
             {navLinks.map((link) => (
@@ -51,12 +81,38 @@ export function Header() {
           </nav>
 
           <div className="hidden md:flex items-center gap-3">
-            <MagneticButton variant="ghost" className="text-primary-foreground hover:bg-primary-foreground/10">
-              Login
-            </MagneticButton>
-            <MagneticButton className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 shadow-lg hover:shadow-xl transition-shadow">
-              Get Started
-            </MagneticButton>
+            {isLoading ? (
+              <div className="h-10 w-24 bg-primary-foreground/20 rounded-lg animate-pulse" />
+            ) : user ? (
+              <>
+                <Link href="/dashboard">
+                  <MagneticButton variant="ghost" className="text-primary-foreground hover:bg-primary-foreground/10">
+                    <User className="h-4 w-4 mr-2" />
+                    Dashboard
+                  </MagneticButton>
+                </Link>
+                <MagneticButton
+                  onClick={handleLogout}
+                  className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 shadow-lg hover:shadow-xl transition-shadow"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign Out
+                </MagneticButton>
+              </>
+            ) : (
+              <>
+                <Link href="/auth/login">
+                  <MagneticButton variant="ghost" className="text-primary-foreground hover:bg-primary-foreground/10">
+                    Login
+                  </MagneticButton>
+                </Link>
+                <Link href="/auth/sign-up">
+                  <MagneticButton className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 shadow-lg hover:shadow-xl transition-shadow">
+                    Get Started
+                  </MagneticButton>
+                </Link>
+              </>
+            )}
           </div>
 
           <button
@@ -69,8 +125,8 @@ export function Header() {
         </div>
       </div>
 
-      {/* Mobile menu */}
-      <div className={cn("md:hidden overflow-hidden transition-all duration-300", isOpen ? "max-h-64" : "max-h-0")}>
+      {/* Mobile menu - Added auth-aware mobile menu */}
+      <div className={cn("md:hidden overflow-hidden transition-all duration-300", isOpen ? "max-h-80" : "max-h-0")}>
         <nav className="container mx-auto px-4 py-4 flex flex-col gap-4">
           {navLinks.map((link, i) => (
             <a
@@ -78,15 +134,49 @@ export function Header() {
               href={link.href}
               className="text-sm font-medium py-2 animate-slide-in-right opacity-0"
               style={{ animationDelay: `${i * 0.1}s`, animationFillMode: "forwards" }}
+              onClick={() => setIsOpen(false)}
             >
               {link.label}
             </a>
           ))}
-          <div className="flex gap-3 pt-2">
-            <Button variant="ghost" className="flex-1 text-primary-foreground border border-primary-foreground/20">
-              Login
-            </Button>
-            <Button className="flex-1 bg-primary-foreground text-primary">Get Started</Button>
+          <div className="flex flex-col gap-3 pt-2">
+            {user ? (
+              <>
+                <Link href="/dashboard" onClick={() => setIsOpen(false)}>
+                  <Button
+                    variant="ghost"
+                    className="w-full text-primary-foreground border border-primary-foreground/20"
+                  >
+                    <User className="h-4 w-4 mr-2" />
+                    Dashboard
+                  </Button>
+                </Link>
+                <Button
+                  onClick={() => {
+                    handleLogout()
+                    setIsOpen(false)
+                  }}
+                  className="w-full bg-primary-foreground text-primary"
+                >
+                  <LogOut className="h-4 w-4 mr-2" />
+                  Sign Out
+                </Button>
+              </>
+            ) : (
+              <>
+                <Link href="/auth/login" onClick={() => setIsOpen(false)}>
+                  <Button
+                    variant="ghost"
+                    className="w-full text-primary-foreground border border-primary-foreground/20"
+                  >
+                    Login
+                  </Button>
+                </Link>
+                <Link href="/auth/sign-up" onClick={() => setIsOpen(false)}>
+                  <Button className="w-full bg-primary-foreground text-primary">Get Started</Button>
+                </Link>
+              </>
+            )}
           </div>
         </nav>
       </div>

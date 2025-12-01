@@ -1,7 +1,21 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { MapPin, Navigation, ArrowRight, Zap, Loader2, Search, Route, Map, AlertTriangle } from "lucide-react"
+import { useState, useCallback, useEffect } from "react"
+import {
+  MapPin,
+  Navigation,
+  ArrowRight,
+  Zap,
+  Loader2,
+  Search,
+  Route,
+  Map,
+  AlertTriangle,
+  TrendingUp,
+  Clock,
+  Star,
+  Check,
+} from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -11,76 +25,19 @@ import { MagneticButton } from "@/components/magnetic-button"
 import { GoogleMapsProvider, useGoogleMaps } from "@/components/google-maps-provider"
 import { PlacesAutocomplete } from "@/components/places-autocomplete"
 import { RouteMap } from "@/components/route-map"
+import { calculateAllFares, getSurgeStatus, type RideOption } from "@/lib/fare-calculator"
+import { createClient } from "@/lib/supabase/client"
 import type { PlaceResult } from "@/types"
+import type { User as SupabaseUser } from "@supabase/supabase-js"
 
 const popularRoutes = [
-  { from: "Mumbai", to: "Pune", distance: 148 },
-  { from: "Delhi", to: "Noida", distance: 25 },
-  { from: "Bangalore", to: "Mysore", distance: 145 },
-  { from: "Chennai", to: "Pondicherry", distance: 150 },
+  { from: "Mumbai, Maharashtra", to: "Pune, Maharashtra", distance: 148 },
+  { from: "Delhi", to: "Noida, UP", distance: 25 },
+  { from: "Bangalore, Karnataka", to: "Mysore, Karnataka", distance: 145 },
+  { from: "Chennai, Tamil Nadu", to: "Pondicherry", distance: 150 },
+  { from: "Hyderabad", to: "Secunderabad", distance: 8 },
+  { from: "Gurgaon, Haryana", to: "Delhi Airport", distance: 28 },
 ]
-
-const rideServices = [
-  {
-    id: "uber",
-    name: "Uber",
-    logo: "🚗",
-    color: "bg-foreground",
-    textColor: "text-background",
-    types: [
-      { name: "UberGo", basePrice: 8, perKm: 9, icon: "🚙" },
-      { name: "Uber Premier", basePrice: 12, perKm: 14, icon: "🚘" },
-      { name: "Uber XL", basePrice: 15, perKm: 18, icon: "🚐" },
-    ],
-  },
-  {
-    id: "ola",
-    name: "Ola",
-    logo: "🟢",
-    color: "bg-success",
-    textColor: "text-success-foreground",
-    types: [
-      { name: "Ola Mini", basePrice: 7, perKm: 8, icon: "🚙" },
-      { name: "Ola Prime", basePrice: 10, perKm: 12, icon: "🚘" },
-      { name: "Ola SUV", basePrice: 14, perKm: 16, icon: "🚐" },
-    ],
-  },
-  {
-    id: "rapido",
-    name: "Rapido",
-    logo: "🏍️",
-    color: "bg-accent",
-    textColor: "text-accent-foreground",
-    types: [
-      { name: "Rapido Bike", basePrice: 3, perKm: 4, icon: "🏍️" },
-      { name: "Rapido Auto", basePrice: 5, perKm: 6, icon: "🛺" },
-      { name: "Rapido Cab", basePrice: 7, perKm: 8, icon: "🚗" },
-    ],
-  },
-  {
-    id: "indrive",
-    name: "InDrive",
-    logo: "💚",
-    color: "bg-chart-1",
-    textColor: "text-chart-1",
-    types: [
-      { name: "InDrive Economy", basePrice: 6, perKm: 7, icon: "🚙" },
-      { name: "InDrive Comfort", basePrice: 9, perKm: 11, icon: "🚘" },
-      { name: "InDrive Business", basePrice: 13, perKm: 15, icon: "🚐" },
-    ],
-  },
-]
-
-interface RideOption {
-  service: string
-  serviceLogo: string
-  serviceColor: string
-  type: string
-  icon: string
-  price: number
-  eta: number
-  savings: number
-}
 
 const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || ""
 
@@ -97,56 +54,104 @@ function RideCompareInner() {
   const [rideType, setRideType] = useState<"all" | "bike" | "auto" | "cab">("all")
   const [focusedInput, setFocusedInput] = useState<"pickup" | "destination" | null>(null)
   const [showMap, setShowMap] = useState(false)
+  const [user, setUser] = useState<SupabaseUser | null>(null)
+  const [isSavingRoute, setIsSavingRoute] = useState(false)
+  const [routeSaved, setRouteSaved] = useState(false)
+  const [searchSaved, setSearchSaved] = useState(false)
 
   const { placesError, isLoaded } = useGoogleMaps()
+  const surgeStatus = getSurgeStatus()
 
-  const calculateRides = useCallback((dist: number) => {
-    setIsSearching(true)
-    setRides([])
+  useEffect(() => {
+    const supabase = createClient()
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setUser(user)
+    })
 
-    setTimeout(() => {
-      const allRides: RideOption[] = []
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setUser(session?.user ?? null)
+    })
 
-      rideServices.forEach((service) => {
-        service.types.forEach((type) => {
-          const basePrice = type.basePrice + type.perKm * dist
-          const surge = Math.random() > 0.7 ? 1 + Math.random() * 0.3 : 1
-          const price = Math.round(basePrice * surge)
-          const eta = Math.round(3 + Math.random() * 12)
-
-          allRides.push({
-            service: service.name,
-            serviceLogo: service.logo,
-            serviceColor: service.color,
-            type: type.name,
-            icon: type.icon,
-            price,
-            eta,
-            savings: 0,
-          })
-        })
-      })
-
-      const sorted = allRides.sort((a, b) => a.price - b.price)
-      const cheapest = sorted[0].price
-
-      sorted.forEach((ride) => {
-        ride.savings = Math.round(((ride.price - cheapest) / cheapest) * 100)
-      })
-
-      setRides(sorted)
-      setSelectedRide(sorted[0])
-      setIsSearching(false)
-    }, 1500)
+    return () => subscription.unsubscribe()
   }, [])
+
+  const saveRideSearch = useCallback(
+    async (pickupLoc: string, destLoc: string, dist: number, dur: number | null, cheapestRide: RideOption | null) => {
+      if (!user) return
+
+      const supabase = createClient()
+      await supabase.from("ride_searches").insert({
+        user_id: user.id,
+        pickup_location: pickupLoc,
+        destination_location: destLoc,
+        pickup_lat: pickupPlace?.geometry?.location?.lat ?? null,
+        pickup_lng: pickupPlace?.geometry?.location?.lng ?? null,
+        destination_lat: destinationPlace?.geometry?.location?.lat ?? null,
+        destination_lng: destinationPlace?.geometry?.location?.lng ?? null,
+        distance_km: dist,
+        duration_mins: dur,
+        cheapest_service: cheapestRide?.service ?? null,
+        cheapest_price: cheapestRide?.price ?? null,
+        ride_type: rideType === "all" ? "cab" : rideType,
+      })
+      setSearchSaved(true)
+      setTimeout(() => setSearchSaved(false), 3000)
+    },
+    [user, pickupPlace, destinationPlace, rideType],
+  )
+
+  const handleSaveRoute = async () => {
+    if (!user || !pickup || !destination) return
+
+    setIsSavingRoute(true)
+    const supabase = createClient()
+
+    const routeName = `${pickup.split(",")[0]} to ${destination.split(",")[0]}`
+
+    await supabase.from("saved_routes").insert({
+      user_id: user.id,
+      name: routeName,
+      pickup_location: pickup,
+      destination_location: destination,
+      pickup_lat: pickupPlace?.geometry?.location?.lat ?? null,
+      pickup_lng: pickupPlace?.geometry?.location?.lng ?? null,
+      destination_lat: destinationPlace?.geometry?.location?.lat ?? null,
+      destination_lng: destinationPlace?.geometry?.location?.lng ?? null,
+    })
+
+    setIsSavingRoute(false)
+    setRouteSaved(true)
+    setTimeout(() => setRouteSaved(false), 3000)
+  }
+
+  const calculateRides = useCallback(
+    (dist: number, pickupLoc: string, destLoc: string, dur?: number) => {
+      setIsSearching(true)
+      setRides([])
+
+      setTimeout(() => {
+        const calculatedRides = calculateAllFares(dist, pickupLoc, destLoc, dur)
+        setRides(calculatedRides)
+        setSelectedRide(calculatedRides[0])
+        setIsSearching(false)
+
+        if (user && calculatedRides.length > 0) {
+          saveRideSearch(pickupLoc, destLoc, dist, dur ?? null, calculatedRides[0])
+        }
+      }, 1500)
+    },
+    [user, saveRideSearch],
+  )
 
   const handleRouteCalculated = useCallback(
     (dist: number, dur: number) => {
       setDistance(dist)
       setDuration(dur)
-      calculateRides(dist)
+      calculateRides(dist, pickup, destination, dur)
     },
-    [calculateRides],
+    [calculateRides, pickup, destination],
   )
 
   const handleQuickRoute = (route: (typeof popularRoutes)[0]) => {
@@ -156,28 +161,33 @@ function RideCompareInner() {
     setDestinationPlace(null)
     setDistance(route.distance)
     setShowMap(false)
-    calculateRides(route.distance)
+    setRouteSaved(false)
+    const estimatedDuration = Math.round((route.distance / 40) * 60)
+    setDuration(estimatedDuration)
+    calculateRides(route.distance, route.from, route.to, estimatedDuration)
   }
 
   const handleSearch = () => {
+    setRouteSaved(false)
     if (pickupPlace && destinationPlace && !placesError) {
       setShowMap(true)
     } else if (pickup && destination) {
       const randomDistance = Math.round(5 + Math.random() * 50)
+      const estimatedDuration = Math.round((randomDistance / 25) * 60)
       setDistance(randomDistance)
-      setDuration(Math.round(randomDistance * 2.5))
-      calculateRides(randomDistance)
+      setDuration(estimatedDuration)
+      calculateRides(randomDistance, pickup, destination, estimatedDuration)
     }
   }
 
   const filteredRides = rides.filter((ride) => {
     if (rideType === "all") return true
-    if (rideType === "bike") return ride.type.toLowerCase().includes("bike")
-    if (rideType === "auto") return ride.type.toLowerCase().includes("auto")
-    if (rideType === "cab")
-      return !ride.type.toLowerCase().includes("bike") && !ride.type.toLowerCase().includes("auto")
-    return true
+    return ride.category === rideType
   })
+
+  const maxPrice = rides.length > 0 ? Math.max(...rides.map((r) => r.price)) : 0
+  const minPrice = rides.length > 0 ? Math.min(...rides.map((r) => r.price)) : 0
+  const potentialSavings = maxPrice - minPrice
 
   return (
     <section id="compare" className="py-20 bg-background">
@@ -185,21 +195,43 @@ function RideCompareInner() {
         <div className="text-center mb-12">
           <Badge variant="secondary" className="mb-4 hover-scale cursor-default">
             <Zap className="h-3 w-3 mr-1 animate-pulse" />
-            Real-time comparison
+            Real-time price comparison
           </Badge>
           <h2 className="text-3xl md:text-4xl font-bold mb-4 text-balance">Compare fares across all platforms</h2>
           <p className="text-muted-foreground max-w-2xl mx-auto">
-            Enter your pickup and drop location to see prices from Uber, Ola, Rapido & InDrive
+            Get accurate fare estimates from Uber, Ola, Rapido & InDrive based on real pricing formulas
           </p>
         </div>
+
+        {searchSaved && user && (
+          <Alert className="max-w-4xl mx-auto mb-6 border-green-500/50 bg-green-500/10 animate-slide-up">
+            <Check className="h-4 w-4 text-green-500" />
+            <AlertDescription className="text-sm">
+              Search saved to your history! View it in your{" "}
+              <a href="/dashboard" className="underline font-medium">
+                dashboard
+              </a>
+              .
+            </AlertDescription>
+          </Alert>
+        )}
+
+        {surgeStatus.active && (
+          <Alert className="max-w-4xl mx-auto mb-6 border-orange-500/50 bg-orange-500/10">
+            <TrendingUp className="h-4 w-4 text-orange-500" />
+            <AlertDescription className="text-sm">
+              <span className="font-medium">Surge pricing active ({surgeStatus.multiplier}x).</span>{" "}
+              {surgeStatus.reason}. Prices may be higher than usual.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {placesError && (
           <Alert className="max-w-4xl mx-auto mb-6 border-amber-500/50 bg-amber-500/10">
             <AlertTriangle className="h-4 w-4 text-amber-500" />
             <AlertDescription className="text-sm">
               <span className="font-medium">Places API unavailable.</span> Location autocomplete is disabled. You can
-              still type locations manually or use popular routes below. To enable autocomplete, ensure the{" "}
-              <span className="font-medium">Places API</span> is enabled in your Google Cloud Console.
+              still type locations manually or use popular routes below.
             </AlertDescription>
           </Alert>
         )}
@@ -214,7 +246,7 @@ function RideCompareInner() {
                   setPickupPlace(place)
                   setShowMap(false)
                 }}
-                placeholder="Pickup location"
+                placeholder="Enter pickup location"
                 type="pickup"
                 focused={focusedInput === "pickup"}
                 onFocus={() => setFocusedInput("pickup")}
@@ -227,7 +259,7 @@ function RideCompareInner() {
                   setDestinationPlace(place)
                   setShowMap(false)
                 }}
-                placeholder="Drop location"
+                placeholder="Enter drop location"
                 type="destination"
                 focused={focusedInput === "destination"}
                 onFocus={() => setFocusedInput("destination")}
@@ -245,7 +277,7 @@ function RideCompareInner() {
               {isSearching ? (
                 <>
                   <Loader2 className="h-5 w-5 mr-2 animate-spin" />
-                  Finding best prices...
+                  Fetching prices from all platforms...
                 </>
               ) : (
                 <>
@@ -274,7 +306,7 @@ function RideCompareInner() {
                     )}
                     style={{ animationDelay: `${i * 0.1}s`, animationFillMode: "forwards" }}
                   >
-                    {route.from} → {route.to}
+                    {route.from.split(",")[0]} → {route.to.split(",")[0]}
                     <span className="ml-2 text-xs opacity-60">{route.distance}km</span>
                   </button>
                 ))}
@@ -295,17 +327,17 @@ function RideCompareInner() {
 
         {(rides.length > 0 || isSearching) && (
           <div className="max-w-4xl mx-auto">
-            {distance && !isSearching && !showMap && (
+            {distance && !isSearching && (
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6 p-4 bg-secondary rounded-xl animate-slide-up">
                 <div className="flex items-center gap-4 flex-wrap">
                   <div className="flex items-center gap-2">
                     <div className="relative">
-                      <MapPin className="h-4 w-4 text-success" />
+                      <MapPin className="h-4 w-4 text-green-500" />
                       <div className="absolute inset-0 animate-ping-slow">
-                        <MapPin className="h-4 w-4 text-success opacity-50" />
+                        <MapPin className="h-4 w-4 text-green-500 opacity-50" />
                       </div>
                     </div>
-                    <span className="font-medium">{pickup}</span>
+                    <span className="font-medium">{pickup.split(",")[0]}</span>
                   </div>
                   <div className="flex items-center gap-1">
                     <div className="h-px w-4 bg-muted-foreground/30" />
@@ -313,18 +345,53 @@ function RideCompareInner() {
                     <div className="h-px w-4 bg-muted-foreground/30" />
                   </div>
                   <div className="flex items-center gap-2">
-                    <Navigation className="h-4 w-4 text-destructive" />
-                    <span className="font-medium">{destination}</span>
+                    <Navigation className="h-4 w-4 text-red-500" />
+                    <span className="font-medium">{destination.split(",")[0]}</span>
                   </div>
                 </div>
-                <div className="flex gap-2">
+                <div className="flex gap-2 flex-wrap">
                   <Badge variant="outline" className="text-lg px-4 py-2 animate-bounce-subtle">
                     {distance} km
                   </Badge>
                   {duration && (
                     <Badge variant="outline" className="text-lg px-4 py-2">
-                      ~{duration} min
+                      <Clock className="h-4 w-4 mr-1" />
+                      {duration} min
                     </Badge>
+                  )}
+                  {potentialSavings > 0 && (
+                    <Badge className="text-lg px-4 py-2 bg-green-500/20 text-green-600 border-green-500/30">
+                      Save up to ₹{potentialSavings}
+                    </Badge>
+                  )}
+                  {user && (
+                    <button
+                      onClick={handleSaveRoute}
+                      disabled={isSavingRoute || routeSaved}
+                      className={cn(
+                        "flex items-center gap-1 px-3 py-2 rounded-lg text-sm font-medium transition-all",
+                        routeSaved
+                          ? "bg-green-500/20 text-green-600"
+                          : "bg-primary/10 text-primary hover:bg-primary/20",
+                      )}
+                    >
+                      {routeSaved ? (
+                        <>
+                          <Check className="h-4 w-4" />
+                          Saved!
+                        </>
+                      ) : isSavingRoute ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Saving...
+                        </>
+                      ) : (
+                        <>
+                          <Star className="h-4 w-4" />
+                          Save Route
+                        </>
+                      )}
+                    </button>
                   )}
                 </div>
               </div>
@@ -332,32 +399,35 @@ function RideCompareInner() {
 
             {!isSearching && rides.length > 0 && (
               <div className="flex gap-2 mb-6 overflow-x-auto pb-2">
-                {(["all", "cab", "auto", "bike"] as const).map((type, i) => (
-                  <button
-                    key={type}
-                    onClick={() => setRideType(type)}
-                    className={cn(
-                      "px-6 py-3 rounded-xl font-medium transition-all whitespace-nowrap",
-                      "hover:scale-105 active:scale-95",
-                      rideType === type
-                        ? "bg-primary text-primary-foreground shadow-lg scale-105"
-                        : "bg-secondary text-secondary-foreground hover:bg-accent",
-                      "animate-slide-up opacity-0",
-                    )}
-                    style={{ animationDelay: `${i * 0.05}s`, animationFillMode: "forwards" }}
-                  >
-                    {type === "all" && "All Options"}
-                    {type === "cab" && "🚗 Cabs"}
-                    {type === "auto" && "🛺 Auto"}
-                    {type === "bike" && "🏍️ Bike"}
-                  </button>
-                ))}
+                {(["all", "cab", "auto", "bike"] as const).map((type, i) => {
+                  const count = rides.filter((r) => type === "all" || r.category === type).length
+                  return (
+                    <button
+                      key={type}
+                      onClick={() => setRideType(type)}
+                      className={cn(
+                        "px-6 py-3 rounded-xl font-medium transition-all whitespace-nowrap",
+                        "hover:scale-105 active:scale-95",
+                        rideType === type
+                          ? "bg-primary text-primary-foreground shadow-lg scale-105"
+                          : "bg-secondary text-secondary-foreground hover:bg-accent",
+                        "animate-slide-up opacity-0",
+                      )}
+                      style={{ animationDelay: `${i * 0.05}s`, animationFillMode: "forwards" }}
+                    >
+                      {type === "all" && `All Options (${count})`}
+                      {type === "cab" && `Cabs (${count})`}
+                      {type === "auto" && `Auto (${count})`}
+                      {type === "bike" && `Bike (${count})`}
+                    </button>
+                  )
+                })}
               </div>
             )}
 
             {isSearching && (
               <div className="grid gap-4">
-                {[1, 2, 3, 4].map((i) => (
+                {[1, 2, 3, 4, 5, 6].map((i) => (
                   <div
                     key={i}
                     className="h-24 rounded-xl bg-secondary overflow-hidden relative"
@@ -389,11 +459,17 @@ function RideCompareInner() {
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
                   <div>
-                    <p className="text-sm opacity-80 mb-1">Best price selected</p>
+                    <p className="text-sm opacity-80 mb-1">Best price found</p>
                     <p className="text-2xl font-bold">
-                      {selectedRide.service} {selectedRide.type} - ₹{selectedRide.price}
+                      {selectedRide.serviceLogo} {selectedRide.service} {selectedRide.type} - ₹{selectedRide.price}
                     </p>
-                    {duration && <p className="text-sm opacity-80 mt-1">Estimated travel time: {duration} mins</p>}
+                    <div className="flex flex-wrap gap-4 mt-2 text-sm opacity-80">
+                      {duration && <span>Travel time: ~{duration} mins</span>}
+                      <span>ETA: {selectedRide.eta} min</span>
+                      {selectedRide.savings === 0 && potentialSavings > 0 && (
+                        <span className="text-green-300">You save ₹{potentialSavings} vs expensive option</span>
+                      )}
+                    </div>
                   </div>
                   <MagneticButton
                     size="lg"

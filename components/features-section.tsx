@@ -4,6 +4,7 @@ import { useState } from "react"
 import { TrendingDown, Clock, Shield, Smartphone, MapPin, Bell } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { cn } from "@/lib/utils"
+import Link from "next/link"
 
 const features = [
   {
@@ -12,6 +13,7 @@ const features = [
     description: "Find the cheapest option across all ride platforms instantly",
     color: "bg-success/10 text-success",
     hoverColor: "group-hover:bg-success group-hover:text-success-foreground",
+    link: "#compare",
   },
   {
     icon: Clock,
@@ -19,6 +21,7 @@ const features = [
     description: "Get live fare updates including surge pricing information",
     color: "bg-accent text-accent-foreground",
     hoverColor: "group-hover:bg-primary group-hover:text-primary-foreground",
+    link: "#compare",
   },
   {
     icon: Shield,
@@ -26,6 +29,7 @@ const features = [
     description: "Compare only from verified and reliable ride partners",
     color: "bg-chart-2/10 text-chart-2",
     hoverColor: "group-hover:bg-chart-2 group-hover:text-white",
+    link: "#partners",
   },
   {
     icon: Smartphone,
@@ -33,6 +37,7 @@ const features = [
     description: "Redirect to your preferred app with one tap to book",
     color: "bg-chart-3/10 text-chart-3",
     hoverColor: "group-hover:bg-chart-3 group-hover:text-white",
+    link: "#compare",
   },
   {
     icon: MapPin,
@@ -40,6 +45,7 @@ const features = [
     description: "Compare fares for intercity travel across major routes",
     color: "bg-chart-4/10 text-chart-4",
     hoverColor: "group-hover:bg-chart-4 group-hover:text-white",
+    link: "#compare",
   },
   {
     icon: Bell,
@@ -47,6 +53,7 @@ const features = [
     description: "Get notified when prices drop for your favorite routes",
     color: "bg-primary/10 text-primary",
     hoverColor: "group-hover:bg-primary group-hover:text-primary-foreground",
+    link: "/auth/sign-up",
   },
 ]
 
@@ -65,59 +72,60 @@ export function FeaturesSection() {
 
         <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
           {features.map((feature, i) => (
-            <Card
-              key={i}
-              className={cn(
-                "group border-2 transition-all duration-500 cursor-default overflow-hidden relative",
-                "hover:border-primary/30 hover:shadow-2xl hover:-translate-y-2",
-                "animate-slide-up opacity-0",
-              )}
-              style={{ animationDelay: `${i * 0.1}s`, animationFillMode: "forwards" }}
-              onMouseEnter={() => setHoveredIndex(i)}
-              onMouseLeave={() => setHoveredIndex(null)}
-            >
-              {/* Background gradient on hover */}
-              <div
+            <Link href={feature.link} key={i}>
+              <Card
                 className={cn(
-                  "absolute inset-0 opacity-0 transition-opacity duration-500",
-                  "bg-gradient-to-br from-primary/5 via-transparent to-accent/5",
-                  hoveredIndex === i && "opacity-100",
+                  "group border-2 transition-all duration-500 cursor-pointer overflow-hidden relative h-full",
+                  "hover:border-primary/30 hover:shadow-2xl hover:-translate-y-2",
+                  "animate-slide-up opacity-0",
                 )}
-              />
-
-              <CardContent className="p-6 relative z-10">
+                style={{ animationDelay: `${i * 0.1}s`, animationFillMode: "forwards" }}
+                onMouseEnter={() => setHoveredIndex(i)}
+                onMouseLeave={() => setHoveredIndex(null)}
+              >
+                {/* Background gradient on hover */}
                 <div
                   className={cn(
-                    "w-14 h-14 rounded-2xl flex items-center justify-center mb-4",
-                    "transition-all duration-500 ease-out",
-                    feature.color,
-                    feature.hoverColor,
-                    "group-hover:scale-110 group-hover:rotate-6 group-hover:shadow-lg",
-                  )}
-                >
-                  <feature.icon
-                    className={cn(
-                      "h-7 w-7 transition-transform duration-500",
-                      hoveredIndex === i && "animate-bounce-subtle",
-                    )}
-                  />
-                </div>
-                <h3 className="text-xl font-bold mb-2 transition-all duration-300 group-hover:translate-x-1">
-                  {feature.title}
-                </h3>
-                <p className="text-muted-foreground transition-all duration-300 group-hover:text-foreground/80">
-                  {feature.description}
-                </p>
-
-                {/* Animated underline */}
-                <div
-                  className={cn(
-                    "absolute bottom-0 left-0 h-1 bg-primary transition-all duration-500",
-                    hoveredIndex === i ? "w-full" : "w-0",
+                    "absolute inset-0 opacity-0 transition-opacity duration-500",
+                    "bg-gradient-to-br from-primary/5 via-transparent to-accent/5",
+                    hoveredIndex === i && "opacity-100",
                   )}
                 />
-              </CardContent>
-            </Card>
+
+                <CardContent className="p-6 relative z-10">
+                  <div
+                    className={cn(
+                      "w-14 h-14 rounded-2xl flex items-center justify-center mb-4",
+                      "transition-all duration-500 ease-out",
+                      feature.color,
+                      feature.hoverColor,
+                      "group-hover:scale-110 group-hover:rotate-6 group-hover:shadow-lg",
+                    )}
+                  >
+                    <feature.icon
+                      className={cn(
+                        "h-7 w-7 transition-transform duration-500",
+                        hoveredIndex === i && "animate-bounce-subtle",
+                      )}
+                    />
+                  </div>
+                  <h3 className="text-xl font-bold mb-2 transition-all duration-300 group-hover:translate-x-1">
+                    {feature.title}
+                  </h3>
+                  <p className="text-muted-foreground transition-all duration-300 group-hover:text-foreground/80">
+                    {feature.description}
+                  </p>
+
+                  {/* Animated underline */}
+                  <div
+                    className={cn(
+                      "absolute bottom-0 left-0 h-1 bg-primary transition-all duration-500",
+                      hoveredIndex === i ? "w-full" : "w-0",
+                    )}
+                  />
+                </CardContent>
+              </Card>
+            </Link>
           ))}
         </div>
       </div>

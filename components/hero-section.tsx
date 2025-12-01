@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { ArrowDown, Sparkles, Zap, TrendingDown, Clock } from "lucide-react"
 import { MagneticButton } from "@/components/magnetic-button"
 import { AnimatedCounter } from "@/components/animated-counter"
+import Link from "next/link"
 
 const rotatingWords = ["cheapest", "fastest", "smartest", "best"]
 
@@ -105,19 +106,23 @@ export function HeroSection() {
             className="flex flex-col sm:flex-row gap-4 justify-center animate-slide-up"
             style={{ animationDelay: "0.3s" }}
           >
-            <MagneticButton
-              size="lg"
-              className="text-lg px-8 py-6 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
-            >
-              Compare Rides Now
-            </MagneticButton>
-            <MagneticButton
-              size="lg"
-              variant="outline"
-              className="text-lg px-8 py-6 border-primary/20 hover:bg-primary/5 bg-transparent hover:border-primary/40 transition-all"
-            >
-              Learn More
-            </MagneticButton>
+            <a href="#compare">
+              <MagneticButton
+                size="lg"
+                className="text-lg px-8 py-6 bg-primary text-primary-foreground hover:bg-primary/90 shadow-lg shadow-primary/20 hover:shadow-xl hover:shadow-primary/30 transition-all"
+              >
+                Compare Rides Now
+              </MagneticButton>
+            </a>
+            <Link href="#features">
+              <MagneticButton
+                size="lg"
+                variant="outline"
+                className="text-lg px-8 py-6 border-primary/20 hover:bg-primary/5 bg-transparent hover:border-primary/40 transition-all"
+              >
+                Learn More
+              </MagneticButton>
+            </Link>
           </div>
 
           <div

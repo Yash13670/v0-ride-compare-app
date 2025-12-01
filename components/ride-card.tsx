@@ -1,22 +1,11 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
-import { Clock, TrendingDown, Check, Users, Sparkles } from "lucide-react"
+import { Clock, TrendingDown, Check, Users, Sparkles, Bike, Car } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { cn } from "@/lib/utils"
-
-interface RideOption {
-  service: string
-  serviceLogo: string
-  serviceColor: string
-  type: string
-  icon: string
-  price: number
-  eta: number
-  savings: number
-}
+import type { RideOption } from "@/lib/fare-calculator"
 
 interface RideCardProps {
   ride: RideOption
@@ -36,6 +25,18 @@ export function RideCard({ ride, isFirst, isSelected, onSelect, delay }: RideCar
       x: ((e.clientX - rect.left) / rect.width) * 100,
       y: ((e.clientY - rect.top) / rect.height) * 100,
     })
+  }
+
+  const getSeats = () => {
+    if (ride.category === "bike") return 1
+    if (ride.category === "auto") return 3
+    if (ride.type.toLowerCase().includes("xl") || ride.type.toLowerCase().includes("suv")) return 6
+    return 4
+  }
+
+  const getCategoryIcon = () => {
+    if (ride.category === "bike") return <Bike className="h-3 w-3" />
+    return <Car className="h-3 w-3" />
   }
 
   return (
@@ -77,23 +78,28 @@ export function RideCard({ ride, isFirst, isSelected, onSelect, delay }: RideCar
             {ride.icon}
           </div>
           <div>
-            <div className="flex items-center gap-2 mb-1">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
               <span className="text-lg">{ride.serviceLogo}</span>
               <span className="font-bold text-lg group-hover:tracking-wide transition-all">{ride.type}</span>
               {isFirst && (
-                <Badge className="bg-success text-success-foreground ml-2 animate-pulse">
+                <Badge className="bg-green-500 text-white ml-2 animate-pulse">
                   <Sparkles className="h-3 w-3 mr-1" />
                   Cheapest
                 </Badge>
               )}
+              <Badge variant="outline" className="text-xs capitalize">
+                {getCategoryIcon()}
+                <span className="ml-1">{ride.category}</span>
+              </Badge>
             </div>
-            <div className="flex items-center gap-4 text-sm text-muted-foreground">
+            <div className="flex items-center gap-4 text-sm text-muted-foreground flex-wrap">
               <span className="flex items-center gap-1">
                 <Clock className="h-4 w-4 group-hover:animate-pulse" />
                 {ride.eta} min away
               </span>
               <span className="flex items-center gap-1">
-                <Users className="h-4 w-4" />4 seats
+                <Users className="h-4 w-4" />
+                {getSeats()} {getSeats() === 1 ? "seat" : "seats"}
               </span>
             </div>
           </div>
@@ -103,7 +109,7 @@ export function RideCard({ ride, isFirst, isSelected, onSelect, delay }: RideCar
           <p
             className={cn(
               "text-2xl font-bold transition-all duration-300",
-              isFirst && "text-success",
+              isFirst && "text-green-600",
               isHovered && "scale-110",
             )}
           >
@@ -111,9 +117,10 @@ export function RideCard({ ride, isFirst, isSelected, onSelect, delay }: RideCar
           </p>
           {ride.savings > 0 && (
             <p className="text-sm text-muted-foreground flex items-center justify-end gap-1">
-              <TrendingDown className="h-3 w-3 text-destructive" />+{ride.savings}% more
+              <TrendingDown className="h-3 w-3 text-red-500" />+{ride.savings}% more
             </p>
           )}
+          {isFirst && ride.savings === 0 && <p className="text-sm text-green-600 font-medium">Best value</p>}
         </div>
 
         <div

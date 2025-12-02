@@ -115,6 +115,9 @@ export function RideCard({ ride, isFirst, isSelected, onSelect, delay }: RideCar
           >
             ₹{ride.price}
           </p>
+          {ride.originalPrice !== undefined && ride.originalPrice !== ride.price && (
+            <p className="text-sm text-muted-foreground line-through mt-1">previous: ₹{ride.originalPrice}</p>
+          )}
           {ride.savings > 0 && (
             <p className="text-sm text-muted-foreground flex items-center justify-end gap-1">
               <TrendingDown className="h-3 w-3 text-red-500" />+{ride.savings}% more

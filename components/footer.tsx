@@ -14,10 +14,10 @@ const productLinks = [
 ]
 
 const companyLinks = [
-  { label: "About Us", href: "#" },
-  { label: "Careers", href: "#" },
-  { label: "Blog", href: "#" },
-  { label: "Contact", href: "#" },
+  { label: "About Us", href: "/company/about" },
+  { label: "Careers", href: "/company/careers" },
+  { label: "Blog", href: "/company/blog" },
+  { label: "Contact", href: "/company/contact" },
 ]
 
 const socialLinks = [
@@ -195,23 +195,50 @@ export function Footer() {
             © 2025 Ridewise. Made with <Heart className="h-3 w-3 text-destructive animate-pulse inline" /> in India
           </p>
           <div className="flex gap-6 text-sm text-muted-foreground">
-            {["Privacy Policy", "Terms of Service", "Cookie Policy"].map((text) => (
-              <a
-                key={text}
-                href="#"
-                className="relative hover:text-foreground transition-colors"
-                onMouseEnter={() => setHoveredLink(`footer-${text}`)}
-                onMouseLeave={() => setHoveredLink(null)}
-              >
-                {text}
-                <span
-                  className={cn(
-                    "absolute -bottom-0.5 left-0 h-px bg-primary transition-all duration-300",
-                    hoveredLink === `footer-${text}` ? "w-full" : "w-0",
-                  )}
-                />
-              </a>
-            ))}
+            <a
+              href="/privacy"
+              className="relative hover:text-foreground transition-colors"
+              onMouseEnter={() => setHoveredLink(`footer-Privacy Policy`)}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              Privacy Policy
+              <span
+                className={cn(
+                  "absolute -bottom-0.5 left-0 h-px bg-primary transition-all duration-300",
+                  hoveredLink === `footer-Privacy Policy` ? "w-full" : "w-0",
+                )}
+              />
+            </a>
+
+            <a
+              href="/terms"
+              className="relative hover:text-foreground transition-colors"
+              onMouseEnter={() => setHoveredLink(`footer-Terms of Service`)}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              Terms of Service
+              <span
+                className={cn(
+                  "absolute -bottom-0.5 left-0 h-px bg-primary transition-all duration-300",
+                  hoveredLink === `footer-Terms of Service` ? "w-full" : "w-0",
+                )}
+              />
+            </a>
+
+            <a
+              href="/cookies"
+              className="relative hover:text-foreground transition-colors"
+              onMouseEnter={() => setHoveredLink(`footer-Cookie Policy`)}
+              onMouseLeave={() => setHoveredLink(null)}
+            >
+              Cookie Policy
+              <span
+                className={cn(
+                  "absolute -bottom-0.5 left-0 h-px bg-primary transition-all duration-300",
+                  hoveredLink === `footer-Cookie Policy` ? "w-full" : "w-0",
+                )}
+              />
+            </a>
           </div>
         </div>
       </div>

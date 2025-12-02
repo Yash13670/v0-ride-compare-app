@@ -130,25 +130,29 @@ export const servicePricing = {
   },
   rapido: {
     rapidoBike: {
-      baseFare: 10,
-      perKmRate: 3.5,
-      perMinRate: 0.3,
-      minimumFare: 15,
-      bookingFee: 0,
+      // Metro-tuned Rapido bike pricing (can be enabled per-city)
+      baseFare: 20,
+      perKmRate: 5,
+      perMinRate: 0.45,
+      minimumFare: 30,
+      bookingFee: 2,
     },
     rapidoAuto: {
-      baseFare: 20,
-      perKmRate: 6,
-      perMinRate: 0.75,
-      minimumFare: 25,
-      bookingFee: 0,
+      // Rapido auto (auto-rickshaw) tuned to match observed website ranges
+      // Keep auto cheaper than car (cab) while increasing from earlier estimates
+      baseFare: 35,
+      perKmRate: 8,
+      perMinRate: 1.0,
+      minimumFare: 45,
+      bookingFee: 5,
     },
     rapidoCab: {
-      baseFare: 30,
-      perKmRate: 9,
-      perMinRate: 1,
-      minimumFare: 40,
-      bookingFee: 0,
+      // Rapido 'cab' (economy car) — keep higher than auto
+      baseFare: 55,
+      perKmRate: 10,
+      perMinRate: 1.2,
+      minimumFare: 65,
+      bookingFee: 8,
     },
   },
   indrive: {
@@ -179,20 +183,22 @@ export const servicePricing = {
 
 // Get time-of-day surge multiplier
 function getTimeSurge(): number {
+  // Deterministic surge based on hour of day. Avoid randomness to keep
+  // server-render and client-render consistent during hydration.
   const hour = new Date().getHours()
 
   // Peak hours: 8-10 AM and 5-8 PM (higher surge)
   if ((hour >= 8 && hour <= 10) || (hour >= 17 && hour <= 20)) {
-    return 1.2 + Math.random() * 0.3 // 1.2x - 1.5x
+    return 1.3 // fixed peak multiplier
   }
 
   // Late night: 10 PM - 6 AM (slight surge)
   if (hour >= 22 || hour < 6) {
-    return 1.1 + Math.random() * 0.2 // 1.1x - 1.3x
+    return 1.15 // fixed late-night multiplier
   }
 
-  // Normal hours: minimal or no surge
-  return 1 + Math.random() * 0.1 // 1.0x - 1.1x
+  // Normal hours: no surge
+  return 1
 }
 
 // Get city multiplier
@@ -219,6 +225,26 @@ function getCityMultiplier(pickup: string, destination: string): number {
   return (pickupMultiplier + destMultiplier) / 2
 }
 
+// Find best city key from a freeform location string
+function getCityKeyFromString(location: string): string {
+  const lower = location.toLowerCase()
+  for (const city of Object.keys(cityPricing)) {
+    if (city === "default") continue
+    if (lower.includes(city)) return city
+  }
+  return "default"
+}
+
+// Per-service adjustments to reflect differences between providers
+// Raised above 1.0 to better match publicly displayed fares (can be tuned)
+const serviceGlobalAdjustment: Record<string, number> = {
+  uber: 1.12,
+  ola: 1.10,
+  // Raise Rapido adjustment to better match observed auto fares
+  rapido: 1.25,
+  indrive: 1.0,
+}
+
 // Calculate fare for a specific service type
 function calculateServiceFare(
   config: FareConfig,
@@ -226,18 +252,47 @@ function calculateServiceFare(
   durationMin: number,
   cityMultiplier: number,
   timeSurge: number,
+  serviceAdjust = 1,
 ): number {
   const baseCost = config.baseFare
   const distanceCost = distanceKm * config.perKmRate
   const timeCost = durationMin * config.perMinRate
 
-  let totalFare = (baseCost + distanceCost + timeCost) * cityMultiplier * timeSurge
-  totalFare += config.bookingFee
+  let totalFare = (baseCost + distanceCost + timeCost) * cityMultiplier * timeSurge * serviceAdjust
+  totalFare += config.bookingFee * serviceAdjust
 
   // Apply minimum fare
-  totalFare = Math.max(totalFare, config.minimumFare * cityMultiplier)
+  totalFare = Math.max(totalFare, config.minimumFare * cityMultiplier * serviceAdjust)
 
   return Math.round(totalFare)
+}
+
+// Provider-specific finalization: rounding, slabs, special rules
+function finalizeFare(provider: string, fare: number): number {
+  if (provider === "uber") {
+    // Uber typically shows whole-rupee fares and may round up
+    return Math.ceil(fare)
+  }
+
+  if (provider === "ola") {
+    // Ola usually displays rounded fares (nearest rupee)
+    return Math.round(fare)
+  }
+
+  if (provider === "rapido") {
+    // Rapido display rules heuristic:
+    // - Bikes and autos in metro city short trips tend to be rounded up to nearest rupee
+    // - Larger fares use 5-rupee slabs
+    if (fare < 80) return Math.ceil(fare)
+    return Math.ceil(fare / 5) * 5
+  }
+
+  if (provider === "indrive") {
+    // InDrive uses negotiated pricing; present rounded to nearest 5 for readability
+    return Math.ceil(fare / 5) * 5
+  }
+
+  return Math.round(fare)
 }
 
 // Estimate duration from distance (average speed based on city traffic)
@@ -246,10 +301,10 @@ function estimateDuration(distanceKm: number, isIntercity: boolean): number {
   const avgSpeed = isIntercity ? 45 : 22
   const baseMinutes = (distanceKm / avgSpeed) * 60
 
-  // Add some randomness for traffic variation
-  const trafficVariation = 0.9 + Math.random() * 0.3 // 0.9x to 1.2x
-
-  return Math.round(baseMinutes * trafficVariation)
+  // Use a deterministic traffic factor to avoid SSR/CSR mismatches.
+  // We bias slightly upward for city traffic and keep intercity stable.
+  const trafficFactor = isIntercity ? 1 : 1.05
+  return Math.round(baseMinutes * trafficFactor)
 }
 
 export interface RideOption {
@@ -278,7 +333,34 @@ export function calculateAllFares(
   const cityMultiplier = getCityMultiplier(pickup, destination)
   const timeSurge = getTimeSurge()
 
+  // Determine city key to decide availability of some vehicle categories (bikes, etc.)
+  const cityKey = getCityKeyFromString(pickup)
+  const bikeAvailableCities = [
+    "mumbai",
+    "delhi",
+    "bangalore",
+    "bengaluru",
+    "pune",
+    "hyderabad",
+    "chennai",
+    "kolkata",
+  ]
+  const isBikeSupported = bikeAvailableCities.includes(cityKey)
+
   const allRides: RideOption[] = []
+
+  // helper: deterministic ETA estimation (arrival time in minutes)
+  function getEtaForCategory(distanceKm: number, category: "bike" | "auto" | "cab") {
+    if (category === "bike") {
+      // bikes usually reach faster for short distances
+      return Math.max(2, Math.round(distanceKm / 3) + 1)
+    }
+    if (category === "auto") {
+      return Math.max(3, Math.round(distanceKm / 2) + 1)
+    }
+    // cab
+    return Math.max(4, Math.round(distanceKm / 1.5) + 2)
+  }
 
   // Uber rides
   allRides.push({
@@ -287,8 +369,8 @@ export function calculateAllFares(
     serviceColor: "bg-foreground",
     type: "UberGo",
     icon: "🚙",
-    price: calculateServiceFare(servicePricing.uber.uberGo, distanceKm, duration, cityMultiplier, timeSurge),
-    eta: Math.round(3 + Math.random() * 7),
+    price: finalizeFare('uber', calculateServiceFare(servicePricing.uber.uberGo, distanceKm, duration, cityMultiplier, timeSurge, serviceGlobalAdjustment.uber)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -299,8 +381,8 @@ export function calculateAllFares(
     serviceColor: "bg-foreground",
     type: "Uber Premier",
     icon: "🚘",
-    price: calculateServiceFare(servicePricing.uber.uberPremier, distanceKm, duration, cityMultiplier, timeSurge),
-    eta: Math.round(5 + Math.random() * 10),
+    price: finalizeFare('uber', calculateServiceFare(servicePricing.uber.uberPremier, distanceKm, duration, cityMultiplier, timeSurge, serviceGlobalAdjustment.uber)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -311,25 +393,27 @@ export function calculateAllFares(
     serviceColor: "bg-foreground",
     type: "Uber XL",
     icon: "🚐",
-    price: calculateServiceFare(servicePricing.uber.uberXL, distanceKm, duration, cityMultiplier, timeSurge),
-    eta: Math.round(8 + Math.random() * 12),
+    price: finalizeFare('uber', calculateServiceFare(servicePricing.uber.uberXL, distanceKm, duration, cityMultiplier, timeSurge, serviceGlobalAdjustment.uber)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
 
   // Only show bike/auto for shorter distances
   if (distanceKm <= 25) {
-    allRides.push({
-      service: "Uber",
-      serviceLogo: "🚗",
-      serviceColor: "bg-foreground",
-      type: "Uber Moto",
-      icon: "🏍️",
-      price: calculateServiceFare(servicePricing.uber.uberMoto, distanceKm, duration, cityMultiplier, timeSurge * 0.9),
-      eta: Math.round(2 + Math.random() * 5),
-      savings: 0,
-      category: "bike",
-    })
+    if (isBikeSupported) {
+      allRides.push({
+        service: "Uber",
+        serviceLogo: "🚗",
+        serviceColor: "bg-foreground",
+        type: "Uber Moto",
+        icon: "🏍️",
+        price: finalizeFare('uber', calculateServiceFare(servicePricing.uber.uberMoto, distanceKm, duration, cityMultiplier, timeSurge * 0.9, serviceGlobalAdjustment.uber)),
+        eta: getEtaForCategory(distanceKm, "bike"),
+        savings: 0,
+        category: "bike",
+      })
+    }
 
     allRides.push({
       service: "Uber",
@@ -337,8 +421,8 @@ export function calculateAllFares(
       serviceColor: "bg-foreground",
       type: "Uber Auto",
       icon: "🛺",
-      price: calculateServiceFare(servicePricing.uber.uberAuto, distanceKm, duration, cityMultiplier, timeSurge * 0.95),
-      eta: Math.round(3 + Math.random() * 6),
+      price: finalizeFare('uber', calculateServiceFare(servicePricing.uber.uberAuto, distanceKm, duration, cityMultiplier, timeSurge * 0.95, serviceGlobalAdjustment.uber)),
+      eta: getEtaForCategory(distanceKm, "auto"),
       savings: 0,
       category: "auto",
     })
@@ -351,8 +435,8 @@ export function calculateAllFares(
     serviceColor: "bg-green-600",
     type: "Ola Mini",
     icon: "🚙",
-    price: calculateServiceFare(servicePricing.ola.olaMini, distanceKm, duration, cityMultiplier, timeSurge * 0.98),
-    eta: Math.round(3 + Math.random() * 6),
+    price: finalizeFare('ola', calculateServiceFare(servicePricing.ola.olaMini, distanceKm, duration, cityMultiplier, timeSurge * 0.98, serviceGlobalAdjustment.ola)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -363,8 +447,8 @@ export function calculateAllFares(
     serviceColor: "bg-green-600",
     type: "Ola Prime Sedan",
     icon: "🚘",
-    price: calculateServiceFare(servicePricing.ola.olaPrime, distanceKm, duration, cityMultiplier, timeSurge * 0.98),
-    eta: Math.round(5 + Math.random() * 8),
+    price: finalizeFare('ola', calculateServiceFare(servicePricing.ola.olaPrime, distanceKm, duration, cityMultiplier, timeSurge * 0.98, serviceGlobalAdjustment.ola)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -375,8 +459,8 @@ export function calculateAllFares(
     serviceColor: "bg-green-600",
     type: "Ola Prime SUV",
     icon: "🚐",
-    price: calculateServiceFare(servicePricing.ola.olaPrimeSUV, distanceKm, duration, cityMultiplier, timeSurge * 0.98),
-    eta: Math.round(7 + Math.random() * 10),
+    price: finalizeFare('ola', calculateServiceFare(servicePricing.ola.olaPrimeSUV, distanceKm, duration, cityMultiplier, timeSurge * 0.98, serviceGlobalAdjustment.ola)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -388,8 +472,8 @@ export function calculateAllFares(
       serviceColor: "bg-green-600",
       type: "Ola Bike",
       icon: "🏍️",
-      price: calculateServiceFare(servicePricing.ola.olaBike, distanceKm, duration, cityMultiplier, timeSurge * 0.85),
-      eta: Math.round(2 + Math.random() * 4),
+      price: finalizeFare('ola', calculateServiceFare(servicePricing.ola.olaBike, distanceKm, duration, cityMultiplier, timeSurge * 0.85, serviceGlobalAdjustment.ola)),
+      eta: getEtaForCategory(distanceKm, "bike"),
       savings: 0,
       category: "bike",
     })
@@ -400,25 +484,65 @@ export function calculateAllFares(
       serviceColor: "bg-green-600",
       type: "Ola Auto",
       icon: "🛺",
-      price: calculateServiceFare(servicePricing.ola.olaAuto, distanceKm, duration, cityMultiplier, timeSurge * 0.9),
-      eta: Math.round(3 + Math.random() * 5),
+      price: finalizeFare('ola', calculateServiceFare(servicePricing.ola.olaAuto, distanceKm, duration, cityMultiplier, timeSurge * 0.9, serviceGlobalAdjustment.ola)),
+      eta: getEtaForCategory(distanceKm, "auto"),
       savings: 0,
       category: "auto",
     })
   }
 
-  // Rapido rides (best for short distances)
-  allRides.push({
-    service: "Rapido",
-    serviceLogo: "🟡",
-    serviceColor: "bg-yellow-500",
-    type: "Rapido Bike",
-    icon: "🏍️",
-    price: calculateServiceFare(servicePricing.rapido.rapidoBike, distanceKm, duration, cityMultiplier, 1), // No surge for Rapido
-    eta: Math.round(2 + Math.random() * 4),
-    savings: 0,
-    category: "bike",
-  })
+  // Compute Rapido prices first so we can enforce logical ordering (auto <= cab)
+  const rapidoBikeRaw = calculateServiceFare(
+    servicePricing.rapido.rapidoBike,
+    distanceKm,
+    duration,
+    cityMultiplier,
+    1,
+    serviceGlobalAdjustment.rapido,
+  )
+
+  const rapidoAutoRaw = calculateServiceFare(
+    servicePricing.rapido.rapidoAuto,
+    distanceKm,
+    duration,
+    cityMultiplier,
+    1,
+    serviceGlobalAdjustment.rapido,
+  )
+
+  const rapidoCabRaw = calculateServiceFare(
+    servicePricing.rapido.rapidoCab,
+    distanceKm,
+    duration,
+    cityMultiplier,
+    1,
+    serviceGlobalAdjustment.rapido,
+  )
+
+  const rapidoBikePrice = finalizeFare("rapido", rapidoBikeRaw)
+  let rapidoAutoPrice = finalizeFare("rapido", rapidoAutoRaw)
+  const rapidoCabPrice = finalizeFare("rapido", rapidoCabRaw)
+
+  // Ensure Rapido Auto is not priced higher than Rapido Cab — auto should be cheaper
+  if (rapidoAutoPrice >= rapidoCabPrice) {
+    // Try a conservative correction: make auto at least slightly cheaper than cab
+    const corrected = Math.max(Math.ceil(rapidoCabPrice - 5), Math.ceil(rapidoAutoPrice * 0.9))
+    rapidoAutoPrice = Math.max(1, corrected)
+  }
+
+  if (isBikeSupported) {
+    allRides.push({
+      service: "Rapido",
+      serviceLogo: "🟡",
+      serviceColor: "bg-yellow-500",
+      type: "Rapido Bike",
+      icon: "🏍️",
+      price: rapidoBikePrice,
+      eta: getEtaForCategory(distanceKm, "bike"),
+      savings: 0,
+      category: "bike",
+    })
+  }
 
   allRides.push({
     service: "Rapido",
@@ -426,8 +550,8 @@ export function calculateAllFares(
     serviceColor: "bg-yellow-500",
     type: "Rapido Auto",
     icon: "🛺",
-    price: calculateServiceFare(servicePricing.rapido.rapidoAuto, distanceKm, duration, cityMultiplier, 1),
-    eta: Math.round(3 + Math.random() * 5),
+    price: rapidoAutoPrice,
+    eta: getEtaForCategory(distanceKm, "auto"),
     savings: 0,
     category: "auto",
   })
@@ -439,8 +563,8 @@ export function calculateAllFares(
       serviceColor: "bg-yellow-500",
       type: "Rapido Cab Economy",
       icon: "🚗",
-      price: calculateServiceFare(servicePricing.rapido.rapidoCab, distanceKm, duration, cityMultiplier, 1),
-      eta: Math.round(4 + Math.random() * 7),
+      price: rapidoCabPrice,
+      eta: getEtaForCategory(distanceKm, "cab"),
       savings: 0,
       category: "cab",
     })
@@ -453,8 +577,8 @@ export function calculateAllFares(
     serviceColor: "bg-green-500",
     type: "InDrive Economy",
     icon: "🚙",
-    price: calculateServiceFare(servicePricing.indrive.indriveEconomy, distanceKm, duration, cityMultiplier, 0.95),
-    eta: Math.round(5 + Math.random() * 8),
+    price: finalizeFare('indrive', calculateServiceFare(servicePricing.indrive.indriveEconomy, distanceKm, duration, cityMultiplier, 0.95, serviceGlobalAdjustment.indrive)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -465,8 +589,8 @@ export function calculateAllFares(
     serviceColor: "bg-green-500",
     type: "InDrive Comfort",
     icon: "🚘",
-    price: calculateServiceFare(servicePricing.indrive.indriveComfort, distanceKm, duration, cityMultiplier, 0.95),
-    eta: Math.round(7 + Math.random() * 10),
+    price: finalizeFare('indrive', calculateServiceFare(servicePricing.indrive.indriveComfort, distanceKm, duration, cityMultiplier, 0.95, serviceGlobalAdjustment.indrive)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -477,8 +601,8 @@ export function calculateAllFares(
     serviceColor: "bg-green-500",
     type: "InDrive Business",
     icon: "🚐",
-    price: calculateServiceFare(servicePricing.indrive.indriveBusiness, distanceKm, duration, cityMultiplier, 0.95),
-    eta: Math.round(10 + Math.random() * 12),
+    price: finalizeFare('indrive', calculateServiceFare(servicePricing.indrive.indriveBusiness, distanceKm, duration, cityMultiplier, 0.95, serviceGlobalAdjustment.indrive)),
+    eta: getEtaForCategory(distanceKm, "cab"),
     savings: 0,
     category: "cab",
   })
@@ -520,4 +644,38 @@ export function getSurgeStatus(): { active: boolean; multiplier: number; reason:
     multiplier: 1,
     reason: "Normal pricing",
   }
+}
+
+// Build a provider booking URL. This returns a best-effort URL to the provider's web booking page
+// including origin/destination as query parameters. Providers have different deep-link formats;
+// we use commonly accepted web entry points and append encoded pickup/destination so the user
+// lands on the provider site with the route context (some params may be ignored by provider).
+export function getBookingUrl(ride: RideOption, pickup: string, destination: string): string {
+  const o = encodeURIComponent(pickup)
+  const d = encodeURIComponent(destination)
+
+  const provider = ride.service.toLowerCase()
+
+  if (provider === "uber") {
+    // Uber web deep-link (mobile web)
+    return `https://m.uber.com/ul/?action=setPickup&pickup[formatted_address]=${o}&dropoff[formatted_address]=${d}`
+  }
+
+  if (provider === "ola") {
+    // Ola booking entry with query hints
+    return `https://book.olacabs.com/?pickup=${o}&destination=${d}`
+  }
+
+  if (provider === "rapido") {
+    // Rapido web entry (bike/auto). Use generic site path with query params
+    return `https://www.rapido.bike/?pickup=${o}&destination=${d}`
+  }
+
+  if (provider === "indrive") {
+    // InDrive web entry
+    return `https://indriver.com/?from=${o}&to=${d}`
+  }
+
+  // Fallback: open a Google search that helps user land on booking page quickly
+  return `https://www.google.com/search?q=book+${provider}+from+${o}+to+${d}`
 }

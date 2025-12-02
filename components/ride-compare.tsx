@@ -25,7 +25,7 @@ import { MagneticButton } from "@/components/magnetic-button"
 import { GoogleMapsProvider, useGoogleMaps } from "@/components/google-maps-provider"
 import { PlacesAutocomplete } from "@/components/places-autocomplete"
 import { RouteMap } from "@/components/route-map"
-import { calculateAllFares, getSurgeStatus, type RideOption } from "@/lib/fare-calculator"
+import { calculateAllFares, getSurgeStatus, type RideOption, getBookingUrl } from "@/lib/fare-calculator"
 import { createClient } from "@/lib/supabase/client"
 import type { PlaceResult } from "@/types"
 import type { User as SupabaseUser } from "@supabase/supabase-js"
@@ -133,8 +133,50 @@ function RideCompareInner() {
 
       setTimeout(() => {
         const calculatedRides = calculateAllFares(dist, pickupLoc, destLoc, dur)
-        setRides(calculatedRides)
-        setSelectedRide(calculatedRides[0])
+
+        // Persist previous fares in localStorage and attach previous price as originalPrice
+        try {
+          if (typeof window !== "undefined") {
+            const storageKey = `ridewise:fares:${encodeURIComponent(pickupLoc)}:${encodeURIComponent(destLoc)}:${dist}`
+            const prevRaw = localStorage.getItem(storageKey)
+            const prevMap: Record<string, number> = {}
+            if (prevRaw) {
+              try {
+                const prevArr = JSON.parse(prevRaw) as Array<{ service: string; type: string; price: number }>
+                prevArr.forEach((p) => {
+                  prevMap[`${p.service}|${p.type}`] = p.price
+                })
+              } catch (e) {
+                // ignore parse errors
+              }
+            }
+
+            // Attach originalPrice when available
+            const withOriginal = calculatedRides.map((r) => ({
+              ...r,
+              originalPrice: prevMap[`${r.service}|${r.type}`] ?? r.price,
+            }))
+
+            setRides(withOriginal)
+            setSelectedRide(withOriginal[0])
+
+            // Save current prices for next time
+            const toStore = calculatedRides.map((r) => ({ service: r.service, type: r.type, price: r.price }))
+            try {
+              localStorage.setItem(storageKey, JSON.stringify(toStore))
+            } catch (e) {
+              // ignore storage errors
+            }
+          } else {
+            setRides(calculatedRides)
+            setSelectedRide(calculatedRides[0])
+          }
+        } catch (err) {
+          // Fallback: set normally
+          setRides(calculatedRides)
+          setSelectedRide(calculatedRides[0])
+        }
+
         setIsSearching(false)
 
         if (user && calculatedRides.length > 0) {
@@ -167,16 +209,50 @@ function RideCompareInner() {
     calculateRides(route.distance, route.from, route.to, estimatedDuration)
   }
 
-  const handleSearch = () => {
+  const handleSearch = async () => {
     setRouteSaved(false)
+
+    // If both places are selected and Places API is available, show the map (RouteMap will calculate route)
     if (pickupPlace && destinationPlace && !placesError) {
       setShowMap(true)
-    } else if (pickup && destination) {
-      const randomDistance = Math.round(5 + Math.random() * 50)
-      const estimatedDuration = Math.round((randomDistance / 25) * 60)
-      setDistance(randomDistance)
+      return
+    }
+
+    if (pickup && destination) {
+      setIsSearching(true)
+
+      try {
+        // Try server-side Distance Matrix first
+        const res = await fetch('/api/distance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ origin: pickup, destination: destination }),
+        })
+
+        if (res.ok) {
+          const data = await res.json()
+          if (data && typeof data.distance_km === 'number') {
+            setDistance(data.distance_km)
+            setDuration(data.duration_min ?? null)
+            calculateRides(data.distance_km, pickup, destination, data.duration_min ?? undefined)
+            return
+          }
+        }
+      } catch (err) {
+        console.warn('Distance API failed, falling back to estimate', err)
+      } finally {
+        setIsSearching(false)
+      }
+
+      // Fallback deterministic estimate (avoid Math.random to prevent
+      // server/client hydration mismatches). Use a small heuristic based
+      // on input string lengths so result is stable across renders.
+      const seed = (pickup.length + destination.length) % 46
+      const fallbackDistance = Math.max(5, Math.min(50, Math.round(seed + 5)))
+      const estimatedDuration = Math.round((fallbackDistance / 25) * 60)
+      setDistance(fallbackDistance)
       setDuration(estimatedDuration)
-      calculateRides(randomDistance, pickup, destination, estimatedDuration)
+      calculateRides(fallbackDistance, pickup, destination, estimatedDuration)
     }
   }
 
@@ -473,6 +549,17 @@ function RideCompareInner() {
                   </div>
                   <MagneticButton
                     size="lg"
+                    onClick={() => {
+                      try {
+                        const url = getBookingUrl(selectedRide, pickup, destination)
+                        if (url) {
+                          // Redirect in same tab as requested
+                          window.location.href = url
+                        }
+                      } catch (err) {
+                        console.error("Booking redirect failed", err)
+                      }
+                    }}
                     className="bg-primary-foreground text-primary hover:bg-primary-foreground/90 text-lg px-8"
                   >
                     Book Now
